@@ -1,0 +1,1044 @@
+[
+    {
+        "id": "3b1b0785fe018009",
+        "type": "tab",
+        "label": "Historical Data",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "3877674a47fac697",
+        "type": "ui_dropdown",
+        "z": "3b1b0785fe018009",
+        "name": "Filter by Time",
+        "label": "Filter by Time",
+        "tooltip": "Select time range for historical data",
+        "place": "Select Time Range",
+        "group": "4c26b4b2ebc6f337",
+        "order": 7,
+        "width": 15,
+        "height": 1,
+        "passthru": false,
+        "multiple": false,
+        "options": [
+            {
+                "label": "Last 1 Hour",
+                "value": "Last 1 Hour",
+                "type": "str"
+            },
+            {
+                "label": "Last 6 Hours",
+                "value": "Last 6 Hours",
+                "type": "str"
+            },
+            {
+                "label": "Last 24 Hours",
+                "value": "Last 24 Hours",
+                "type": "str"
+            }
+        ],
+        "payload": "",
+        "topic": "filter_time",
+        "topicType": "str",
+        "className": "",
+        "x": 100,
+        "y": 400,
+        "wires": [
+            [
+                "181504fb313f899c",
+                "2825eb682c251360"
+            ]
+        ]
+    },
+    {
+        "id": "181504fb313f899c",
+        "type": "function",
+        "z": "3b1b0785fe018009",
+        "name": "Query get temperature data",
+        "func": "/*\n * Node: Query get temperature data (MODIFIED)\n * Input: msg.payload = String dari dropdown (\"Last 1 Hour\", etc.)\n * Output: msg.topic = String query SQL\n * Tujuan: Membuat query SQL yang mengambil SEMUA kolom relevan.\n */\n\nconst filterSelection = msg.payload;\n// --- PILIH KOLOM YANG DIBUTUHKAN ---\nconst columnsToSelect = \"timestamp, temperature, humidity, wind_speed_mps, wind_direction, pm25, pressure\"; // Tambahkan kolom lain jika perlu (pisahkan dengan koma)\nconst baseSql = `SELECT ${columnsToSelect} FROM sensor_data`;\n// ------------------------------------\nlet whereClause = \"\";\nconst orderByClause = \" ORDER BY timestamp ASC\";\n\nswitch (filterSelection) {\n    case \"Last 1 Hour\":\n        whereClause = \" WHERE timestamp >= DATETIME('now', '-1 hour')\";\n        node.log(\"Filter: Last 1 Hour\");\n        break;\n    case \"Last 6 Hours\":\n        whereClause = \" WHERE timestamp >= DATETIME('now', '-6 hours')\";\n        node.log(\"Filter: Last 6 Hours\");\n        break;\n    case \"Last 24 Hours\":\n        whereClause = \" WHERE timestamp >= DATETIME('now', '-24 hours')\";\n        node.log(\"Filter: Last 24 Hours\");\n        break;\n    default:\n        node.warn(\"Nilai filter tidak dikenal: \" + filterSelection + \". Menggunakan default Last 24 Hours.\");\n        whereClause = \" WHERE timestamp >= DATETIME('now', '-24 hours')\";\n        break;\n}\n\nmsg.topic = baseSql + whereClause + orderByClause;\n// delete msg.payload; // Opsional\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 340,
+        "y": 400,
+        "wires": [
+            [
+                "82463be96330a613"
+            ]
+        ]
+    },
+    {
+        "id": "82463be96330a613",
+        "type": "sqlite",
+        "z": "3b1b0785fe018009",
+        "mydb": "54b527ebd3b3c910",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "SQLite Query",
+        "x": 560,
+        "y": 400,
+        "wires": [
+            [
+                "d8926c6c4893066e",
+                "f51da17c5fdedb63"
+            ]
+        ]
+    },
+    {
+        "id": "d8926c6c4893066e",
+        "type": "debug",
+        "z": "3b1b0785fe018009",
+        "name": "Debug Query Output",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 780,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "f51da17c5fdedb63",
+        "type": "function",
+        "z": "3b1b0785fe018009",
+        "name": "Format Data for Chart",
+        "func": "/*\n * Node: Format Data for ALL Charts (MODIFIED)\n * Input: msg.payload = Array objek hasil query SQLite (semua kolom relevan)\n * Output: Array pesan, msg[0] untuk chart Temp, msg[1] untuk chart Humidity, etc.\n * Tujuan: Mengonversi timestamp ke WIB & memformat data untuk SEMUA chart.\n */\n\nconst queryResult = msg.payload;\n\n// --- Struktur data dasar untuk setiap chart ---\n// (Nama series harus unik atau deskriptif)\nlet tempData = [{ series: [\"Temperature (°C)\"], data: [[]], labels: [] }];\nlet humidityData = [{ series: [\"Humidity (%)\"], data: [[]], labels: [] }];\nlet windspeedData = [{ series: [\"Wind Speed (m/s)\"], data: [[]], labels: [] }];\nlet winddirectionData = [{ series: [\"Wind Direction (°)\"], data: [[]], labels: [] }];\nlet pm25Data = [{ series: [\"PM2.5 (µg/m³)\"], data: [[]], labels: [] }];\nlet pressureData = [{ series: [\"Pressure (hPa)\"], data: [[]], labels: [] }];\n// Tambahkan struktur data lain jika perlu\n\n// --- Helper functions (sama seperti sebelumnya) ---\nfunction pad(number) {\n    return (number < 10) ? '0' + number : number;\n}\n\nfunction formatToWibString(date) {\n    // Pastikan objek Date valid sebelum diformat\n    if (!date || isNaN(date.getTime())) return null;\n    const year = date.getUTCFullYear();\n    const month = pad(date.getUTCMonth() + 1);\n    const day = pad(date.getUTCDate());\n    const hours = pad(date.getUTCHours());\n    const minutes = pad(date.getUTCMinutes());\n    const seconds = pad(date.getUTCSeconds());\n    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;\n}\n\nfunction parseAndConvertToWibDate(timestampString) {\n    try {\n        const utcString = timestampString.replace(' ', 'T') + 'Z';\n        const utcDate = new Date(utcString);\n        if (isNaN(utcDate.getTime())) {\n            node.warn(\"Timestamp tidak valid: \" + timestampString);\n            return null; // Kembalikan null jika tidak valid\n        }\n        const wibOffset = 7 * 60 * 60 * 1000;\n        const wibTimeMillis = utcDate.getTime() + wibOffset;\n        return new Date(wibTimeMillis); // Kembalikan objek Date WIB\n    } catch (e) {\n        node.error(`Error parsing timestamp: \"${timestampString}\". Error: ${e.message}`);\n        return null; // Kembalikan null jika error\n    }\n}\n// --- End Helper Functions ---\n\n\nif (Array.isArray(queryResult) && queryResult.length > 0) {\n    for (let item of queryResult) {\n        if (!item || !item.hasOwnProperty('timestamp')) {\n            node.warn(\"Item data tidak lengkap (missing timestamp): \" + JSON.stringify(item));\n            continue; // Lewati item ini jika timestamp tidak ada\n        }\n\n        // Konversi timestamp ke WIB sekali saja\n        const wibDate = parseAndConvertToWibDate(item.timestamp);\n        const wibTimestampString = formatToWibString(wibDate);\n\n        // Hanya proses jika timestamp valid\n        if (wibTimestampString) {\n            // Proses Temperature (jika ada dan tidak null)\n            if (item.hasOwnProperty('temperature') && item.temperature !== null) {\n                tempData[0].data[0].push({ x: wibTimestampString, y: parseFloat(item.temperature) });\n            }\n\n            // Proses Humidity (jika ada dan tidak null)\n            if (item.hasOwnProperty('humidity') && item.humidity !== null) {\n                humidityData[0].data[0].push({ x: wibTimestampString, y: parseFloat(item.humidity) });\n            }\n\n            if (item.hasOwnProperty('wind_speed_mps') && item.pressure !== null) {\n                windspeedData[0].data[0].push({ x: wibTimestampString, y: parseFloat(item.wind_speed_mps) });\n            }\n\n            if (item.hasOwnProperty('wind_direction') && item.pressure !== null) {\n                winddirectionData[0].data[0].push({ x: wibTimestampString, y: parseFloat(item.wind_direction) });\n            }\n\n            // Proses PM2.5 (jika ada dan tidak null)\n            if (item.hasOwnProperty('pm25') && item.pm25 !== null) {\n                pm25Data[0].data[0].push({ x: wibTimestampString, y: parseFloat(item.pm25) });\n            }\n\n            if (item.hasOwnProperty('pressure') && item.pressure !== null) {\n                pressureData[0].data[0].push({ x: wibTimestampString, y: parseFloat(item.pressure) });\n            }\n            // Tambahkan proses untuk data lain jika perlu\n        }\n    }\n} else {\n    node.log(\"Tidak ada data yang diterima dari query untuk diformat.\");\n}\n\n// Kembalikan array pesan. Urutan penting!\n// Pesan ke-1 -> Output 1 (untuk chart Suhu)\n// Pesan ke-2 -> Output 2 (untuk chart Kelembaban)\n// Pesan ke-3 -> Output 3 (untuk chart PM2.5)\nreturn [\n    { payload: tempData },\n    { payload: humidityData },\n    { payload: windspeedData },\n    { payload: winddirectionData },\n    { payload: pm25Data },\n    { payload: pressureData }\n    // Tambahkan pesan lain jika ada output tambahan\n];",
+        "outputs": 6,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 780,
+        "y": 360,
+        "wires": [
+            [
+                "0f23287ee8485e4e",
+                "d023e60770a2d7ed"
+            ],
+            [
+                "0486cbcd14f261cf"
+            ],
+            [
+                "32d59ac52753b849"
+            ],
+            [
+                "c8d4f3533c1a443d"
+            ],
+            [
+                "e112b63a1b5721ef"
+            ],
+            [
+                "dfab3f62e8a340dd"
+            ]
+        ]
+    },
+    {
+        "id": "d023e60770a2d7ed",
+        "type": "debug",
+        "z": "3b1b0785fe018009",
+        "name": "Debug Chart Data",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1030,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "0f23287ee8485e4e",
+        "type": "ui_chart",
+        "z": "3b1b0785fe018009",
+        "name": "Temperature Sensor Chart",
+        "group": "4c26b4b2ebc6f337",
+        "order": 9,
+        "width": 13,
+        "height": 8,
+        "label": "Temperature Sensor Data",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "dd HH:mm",
+        "interpolate": "linear",
+        "nodata": "No Data Available",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": "1",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#544ae3",
+            "#151339",
+            "#ff7f0e",
+            "#2ca02c",
+            "#9467bd",
+            "#d62728",
+            "#1f77b4",
+            "#aec7e8",
+            "#ff9896"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1040,
+        "y": 340,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "69dd40b1945295e3",
+        "type": "ui_template",
+        "z": "3b1b0785fe018009",
+        "group": "4c26b4b2ebc6f337",
+        "name": "Header",
+        "order": 2,
+        "width": 15,
+        "height": 2,
+        "format": "<h1 style='text-align:center;'>Historical Sensor Data</h1>\n<p style='text-align:center;'>View historical data for all sensors over selected time periods.</p>",
+        "storeOutMessages": false,
+        "fwdInMessages": false,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "className": "",
+        "x": 100,
+        "y": 340,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "10c6f6ce5f2efdd7",
+        "type": "mqtt in",
+        "z": "3b1b0785fe018009",
+        "name": "MQTT Weather Data",
+        "topic": "weather/station_data",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "1498bfb91f583e3e",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 170,
+        "y": 180,
+        "wires": [
+            [
+                "d57b150b28c12f28"
+            ]
+        ]
+    },
+    {
+        "id": "27538856aabb6549",
+        "type": "function",
+        "z": "3b1b0785fe018009",
+        "name": "Prepare SQLite Insert",
+        "func": "// Ambil data dari msg.payload\nvar temperature = msg.payload.temperature;\nvar humidity = msg.payload.humidity;\nvar wind_speed_mps = msg.payload.wind_speed_mps;\nvar wind_direction = msg.payload.wind_direction;\nvar rain_value = msg.payload.rain_value;\nconst pressure = msg.payload.pressure;\nconst pm25 = msg.payload.pm25;\nconst heat_index = msg.payload.heat_index\n\nmsg.topic = \"INSERT INTO sensor_data (temperature, humidity, heat_index, wind_speed_mps, wind_direction, rain_value, pm25, pressure) VALUES (\" + temperature + \", \" + humidity + \", \" + heat_index + \", \" + wind_speed_mps + \",\" + wind_direction + \",\" + rain_value + \", \"+ pm25 +\", \"+ pressure+\")\";\n\n// Bind nilai ke parameter\nmsg.bindings = [\n    parseFloat(temperature),\n    parseFloat(humidity),\n    parseFloat(wind_speed_mps),\n    parseFloat(wind_direction),\n    parseFloat(rain_value),\n    parseFloat(pm25),\n    parseFloat(pressure)\n];\n\nreturn msg;\n\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 580,
+        "y": 180,
+        "wires": [
+            [
+                "d38f5fdada092515"
+            ]
+        ]
+    },
+    {
+        "id": "d38f5fdada092515",
+        "type": "sqlite",
+        "z": "3b1b0785fe018009",
+        "mydb": "54b527ebd3b3c910",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "Insert to SQLite",
+        "x": 800,
+        "y": 180,
+        "wires": [
+            [
+                "c141c2f0f90ea9f0"
+            ]
+        ]
+    },
+    {
+        "id": "d57b150b28c12f28",
+        "type": "function",
+        "z": "3b1b0785fe018009",
+        "name": "Parse JSON",
+        "func": "let data = msg.payload;\n\n    // Jika payload adalah string, parse ke JSON\n    if (typeof data === 'string') {\n        data = JSON.parse(data);\n    }\n\n    // Buat objek baru dengan nilai yang di-parse ke number\n    msg.payload = {\n        temperature: parseFloat(data.temperature),\n        humidity: parseFloat(data.humidity),\n        heat_index: parseFloat(data.heat_index),\n        wind_speed_mps: parseFloat(data.wind_speed_mps),\n        wind_direction: parseFloat(data.wind_direction),\n        rain_value: parseFloat(data.rain_value),\n        pm25: parseFloat(data.pm25),\n        pressure: parseFloat(data.pressure)\n    };\n\n    return msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 350,
+        "y": 180,
+        "wires": [
+            [
+                "27538856aabb6549"
+            ]
+        ]
+    },
+    {
+        "id": "c141c2f0f90ea9f0",
+        "type": "debug",
+        "z": "3b1b0785fe018009",
+        "name": "debug 2",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1000,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "2825eb682c251360",
+        "type": "debug",
+        "z": "3b1b0785fe018009",
+        "name": "debug 3",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 300,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "0486cbcd14f261cf",
+        "type": "ui_chart",
+        "z": "3b1b0785fe018009",
+        "name": "Humidity Sensor Chart",
+        "group": "4c26b4b2ebc6f337",
+        "order": 11,
+        "width": 13,
+        "height": 8,
+        "label": "Humidity Sensor Data",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "dd HH:mm",
+        "interpolate": "linear",
+        "nodata": "No Data Available",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": "1",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#544ae3",
+            "#151339",
+            "#ff7f0e",
+            "#2ca02c",
+            "#9467bd",
+            "#d62728",
+            "#1f77b4",
+            "#aec7e8",
+            "#ff9896"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1020,
+        "y": 380,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "32d59ac52753b849",
+        "type": "ui_chart",
+        "z": "3b1b0785fe018009",
+        "name": "Wind Speed Sensor Chart",
+        "group": "4c26b4b2ebc6f337",
+        "order": 19,
+        "width": 13,
+        "height": 8,
+        "label": "Wind Speed Sensor Data",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "dd HH:mm",
+        "interpolate": "linear",
+        "nodata": "No Data Available",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": "1",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#544ae3",
+            "#151339",
+            "#ff7f0e",
+            "#2ca02c",
+            "#9467bd",
+            "#d62728",
+            "#1f77b4",
+            "#aec7e8",
+            "#ff9896"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1030,
+        "y": 420,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "c8d4f3533c1a443d",
+        "type": "ui_chart",
+        "z": "3b1b0785fe018009",
+        "name": "Wind Direction Sensor Chart",
+        "group": "4c26b4b2ebc6f337",
+        "order": 21,
+        "width": 13,
+        "height": 8,
+        "label": "Wind Direction Sensor Data",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "dd HH:mm",
+        "interpolate": "linear",
+        "nodata": "No Data Available",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": "1",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#544ae3",
+            "#151339",
+            "#ff7f0e",
+            "#2ca02c",
+            "#9467bd",
+            "#d62728",
+            "#1f77b4",
+            "#aec7e8",
+            "#ff9896"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1040,
+        "y": 460,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "e112b63a1b5721ef",
+        "type": "ui_chart",
+        "z": "3b1b0785fe018009",
+        "name": "PM2.5 Sensor Chart",
+        "group": "4c26b4b2ebc6f337",
+        "order": 29,
+        "width": 13,
+        "height": 8,
+        "label": "PM2.5 Sensor Data",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "dd HH:mm",
+        "interpolate": "linear",
+        "nodata": "No Data Available",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": "1",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#544ae3",
+            "#151339",
+            "#ff7f0e",
+            "#2ca02c",
+            "#9467bd",
+            "#d62728",
+            "#1f77b4",
+            "#aec7e8",
+            "#ff9896"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1020,
+        "y": 500,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "dfab3f62e8a340dd",
+        "type": "ui_chart",
+        "z": "3b1b0785fe018009",
+        "name": "Pressure Sensor Chart",
+        "group": "4c26b4b2ebc6f337",
+        "order": 31,
+        "width": 13,
+        "height": 8,
+        "label": "Pressure Sensor Data",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "dd HH:mm",
+        "interpolate": "linear",
+        "nodata": "No Data Available",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": "1",
+        "removeOlderPoints": "",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#544ae3",
+            "#151339",
+            "#ff7f0e",
+            "#2ca02c",
+            "#9467bd",
+            "#d62728",
+            "#1f77b4",
+            "#aec7e8",
+            "#ff9896"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 1020,
+        "y": 540,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "histori_page_in",
+        "type": "http in",
+        "z": "3b1b0785fe018009",
+        "name": "GET /histori",
+        "url": "/histori",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 110,
+        "y": 580,
+        "wires": [
+            [
+                "970d155f06591298"
+            ]
+        ]
+    },
+    {
+        "id": "histori_page_out",
+        "type": "http response",
+        "z": "3b1b0785fe018009",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 530,
+        "y": 580,
+        "wires": []
+    },
+    {
+        "id": "970d155f06591298",
+        "type": "template",
+        "z": "3b1b0785fe018009",
+        "name": "",
+        "field": "payload",
+        "fieldType": "msg",
+        "format": "handlebars",
+        "syntax": "mustache",
+        "template": "<!DOCTYPE html>\n<html lang=\"en\">\n\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Historical Sensor Data</title>\n    <link href=\"https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap\" rel=\"stylesheet\">\n    <script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js\"></script>\n    <script src=\"https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js\"></script>\n\n    <style>\n        /* --- START: Common Styles (Konsisten untuk semua halaman) --- */\n        * {\n            margin: 0;\n            padding: 0;\n            box-sizing: border-box;\n            font-family: 'Poppins', sans-serif;\n        }\n\n        body {\n            background-color: #06283d;\n            color: #ffffff;\n            overflow-x: hidden;\n            display: flex; /* Dibutuhkan untuk layout flex sidebar+content */\n            min-height: 100vh;\n        }\n\n        .dashboard-container { /* Wrapper opsional, jika Anda menggunakannya */\n            display: flex;\n            width: 100%; /* Pastikan container mengisi body */\n        }\n\n        /* --- Sidebar Styling Konsisten --- */\n        .sidebar {\n            width: 240px;\n            background-color: #dff6ff;\n            padding: 20px; /* Padding konsisten */\n            display: flex;\n            flex-direction: column;\n            align-items: center;\n            position: fixed;\n            top: 0;\n            left: 0;\n            height: 100vh;\n            flex-shrink: 0;\n             /* Hapus overflow-y agar tidak bisa scroll */\n            overflow-y: visible;\n        }\n\n        .logo {\n            margin-bottom: 40px; /* Jarak Bawah Logo Konsisten */\n            text-align: center;\n            width: 100%; /* Pastikan container logo bisa diatur */\n        }\n\n        .logo img {\n            width: 180px; /* Ukuran Logo Desktop Konsisten */\n            height: auto;\n        }\n\n        .nav-items {\n            width: 100%;\n            margin-top: 20px; /* Jarak Atas dari Logo Konsisten */\n        }\n\n        .nav-item {\n            display: flex;\n            align-items: center;\n            width: 100%;\n            padding: 12px 15px; /* Padding Item Konsisten */\n            margin-bottom: 10px; /* Jarak Antar Item Konsisten */\n            border-radius: 8px;\n            color: #06283d;\n            text-decoration: none;\n            transition: background-color 0.3s;\n        }\n\n        .nav-item.active {\n            background-color: rgba(6, 40, 61, 0.1);\n            font-weight: 500;\n        }\n\n        .nav-item:hover:not(.active) {\n            background-color: rgba(6, 40, 61, 0.1);\n        }\n\n        .nav-icon {\n            margin-right: 12px; /* Jarak Ikon Konsisten */\n            width: 20px;       /* Ukuran Ikon Konsisten */\n            height: 20px;      /* Ukuran Ikon Konsisten */\n            stroke: #06283d;   /* Warna Ikon Konsisten */\n            fill: none;\n            stroke-width: 2;\n            stroke-linecap: round;\n            stroke-linejoin: round;\n            flex-shrink: 0;\n        }\n         /* Styling untuk ikon Font Awesome jika masih dipakai */\n         .nav-item i {\n             margin-right: 12px;\n             font-size: 18px; /* Sesuaikan agar mirip SVG */\n             width: 20px;\n             text-align: center;\n             color: #06283d;\n         }\n\n\n        /* --- Main Content Styling Konsisten --- */\n         /* Pastikan nama class konsisten di semua HTML (misal pakai .main-content) */\n         .main-content {\n             flex: 1;\n             padding: 30px;\n             background-color: #06283d;\n             margin-left: 240px; /* Offset Sidebar Konsisten */\n             overflow-y: auto;\n              min-height: 100vh; /* Pastikan konten setidaknya setinggi viewport */\n         }\n        /* --- END: Common Styles --- */\n\n\n        /* --- START: Gaya Spesifik Per Halaman --- */\n        /* Tambahkan atau sesuaikan gaya spesifik untuk KONTEN UTAMA halaman ini */\n        /* Contoh untuk historical data.html */\n        .main-content h1 { font-size: 36px; font-weight: 700; margin-bottom: 10px; text-align: center; }\n        .main-content p { color: #94a3b8; font-size: 16px; margin-bottom: 20px; text-align: center; }\n        .time-selector { margin-bottom: 30px; text-align: center; }\n        /* ... (Salin SEMUA gaya spesifik KONTEN lainnya dari CSS Anda sebelumnya) ... */\n        .time-selector label { margin-right: 10px; color: #94a3b8; font-size: 16px; }\n        .time-selector select { padding: 10px 15px; border-radius: 8px; border: none; background-color: #dff6ff; color: #06283d; font-family: 'Poppins', sans-serif; font-size: 14px; min-width: 150px; }\n        .charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 30px; max-width: 1200px; margin-left: auto; margin-right: auto; }\n        .chart-box { background-color: #dff6ff; padding: 20px; border-radius: 16px; color: #06283d; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); display: flex; flex-direction: column; align-items: center; }\n        .chart-box h3 { font-size: 16px; font-weight: 500; margin-bottom: 15px; text-align: center; }\n        .chart-box canvas { width: 100% !important; height: 220px !important; }\n        .table-container { margin-top: 40px; background-color: #dff6ff; padding: 20px; border-radius: 16px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); overflow-x: auto; color: #06283d; max-height: 500px; overflow-y: auto; }\n        .table-container h3 { font-size: 24px; font-weight: 600; margin-bottom: 15px; }\n        .pagination-controls { margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }\n        .pagination-controls button { background-color: #06283d; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; }\n        .pagination-controls button:hover:not(:disabled) { background-color: #094c74; }\n        .pagination-controls button:disabled { background-color: #1e4a63; color: #777; cursor: not-allowed; }\n        .pagination-controls span { font-size: 14px; color: #333; }\n        #downloadCsvBtn { background-color: #06283d; color: #ffffff; padding: 10px 18px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; margin-bottom: 20px; transition: background-color 0.3s ease; display: inline-flex; align-items: center; gap: 8px; }\n         #downloadCsvBtn svg { stroke: #ffffff;}\n        #downloadCsvBtn:hover { background-color: #094c74; }\n        #dataTable { width: 100%; border-collapse: collapse; }\n        #dataTable th, #dataTable td { padding: 12px 15px; text-align: left; border-bottom: 1px solid rgba(6, 40, 61, 0.2); font-size: 14px; }\n        #dataTable th { background-color: rgba(6, 40, 61, 0.1); font-weight: 600; }\n        #dataTable tbody tr:hover { background-color: rgba(6, 40, 61, 0.1); }\n\n        /* --- END: Gaya Spesifik Per Halaman --- */\n\n\n        /* --- START: Responsive Styles Konsisten --- */\n        @media (max-width: 1200px) { /* Breakpoint besar ke tablet */\n             /* Sidebar menjadi statis dan horizontal */\n             .sidebar {\n                position: static; width: 100%; height: auto;\n                flex-direction: row; justify-content: space-between; padding: 15px;\n                overflow-y: visible; /* Hapus scroll */\n            }\n             /* Konten tidak perlu margin kiri lagi */\n             .main-content { margin-left: 0; padding: 20px; }\n             /* Sesuaikan ukuran logo untuk tablet */\n             .logo img { width: 120px; }\n             /* Tata ulang item nav */\n             .nav-items { width: auto; margin-top: 0; display: flex; }\n             .nav-item { margin-right: 5px; margin-bottom: 0;}\n              /* Sesuaikan layout grid konten jika perlu */\n              .charts-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); } /* Contoh untuk histori */\n              /* Tambahkan penyesuaian untuk layout grid halaman lain jika perlu */\n        }\n\n        @media (max-width: 768px) { /* Tablet kecil ke mobile */\n            /* Sidebar sudah diatur di breakpoint sebelumnya */\n            /* Perkecil logo lagi */\n             .logo img { width: 100px; }\n             /* Sembunyikan teks nav item */\n             .nav-items { font-size: 0; }\n             .nav-item span { display: none; }\n             .nav-icon, .nav-item i { margin-right: 0; } /* Hapus margin ikon */\n             .nav-item { padding: 8px 10px; }\n             /* Sesuaikan layout konten untuk mobile */\n             .main-content h1 { font-size: 28px; }\n              .charts-grid { grid-template-columns: 1fr; } /* Contoh untuk histori */\n              .team-grid { grid-template-columns: 1fr; } /* Contoh untuk about us */\n              .info-grid { grid-template-columns: 1fr; } /* Contoh untuk about us */\n              .weather-cards { grid-template-columns: 1fr; } /* Contoh untuk cuaca/lingkungan */\n              /* ... (Sesuaikan gaya lain untuk mobile) ... */\n        }\n\n         @media (max-width: 480px) { /* Mobile sangat kecil */\n             .main-content h1 { font-size: 24px;}\n              /* ... (Penyesuaian lebih lanjut jika perlu) ... */\n         }\n        /* --- END: Responsive Styles --- */\n\n    </style>\n</head>\n\n<body>\n    <div class=\"dashboard-container\">\n        <!-- Sidebar -->\n        <div class=\"sidebar\">\n            <div class=\"logo\">\n                <img src=\"https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Weather%20Station%20Dashboard.jpg-hYlNXdOXcA0yAHPry60kUI7nsy6Z5h.jpeg\" alt=\"CloudNex Logo\">\n            </div>\n\n            <div class=\"nav-items\">\n                <a href=\"/cuaca\" class=\"nav-item\">\n                    <svg class=\"nav-icon\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"\n                        stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n                        <path d=\"M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\"></path>\n                        <polyline points=\"9 22 9 12 15 12 15 22\"></polyline>\n                    </svg>\n                    <span>Dashboard</span>\n                </a>\n\n                <a href=\"/lingkungan\" class=\"nav-item\">\n                    <svg class=\"nav-icon\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"\n                        stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n                        <path d=\"M22 12h-4l-3 9L9 3l-3 9H2\"></path>\n                    </svg>\n                    <span>Environmental Monitoring</span>\n                </a>\n\n                <a href=\"/histori\" class=\"nav-item active\">\n                    <svg class=\"nav-icon\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"\n                        stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n                        <path d=\"M3 3v18h18\"></path>\n                        <path d=\"m19 9-5 5-4-4-3 3\"></path>\n                    </svg>\n                    <span>Historical Data</span>\n                </a>\n\n                <a href=\"/about-us\" class=\"nav-item\">\n                    <svg class=\"nav-icon\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\"\n                        stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n                        <path d=\"M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2\"></path>\n                        <circle cx=\"9\" cy=\"7\" r=\"4\"></circle>\n                        <path d=\"M23 21v-2a4 4 0 0 0-3-3.87\"></path>\n                        <path d=\"M16 3.13a4 4 0 0 1 0 7.75\"></path>\n                    </svg>\n                    <span>About Us</span>\n                </a>\n            </div>\n        </div>\n\n        <!-- Main Content -->\n        <div class=\"main-content\">\n            <h1>Historical Sensor Data</h1>\n            <p>View historical data for all sensors over selected time periods.</p>\n\n            <!-- Time Range Selector (Dropdown) -->\n            <div class=\"time-selector\">\n                <label for=\"timeFilter\">Filter by Time:</label>\n                <select id=\"timeFilter\">\n                    <option value=\"Last 1 Hour\">Last 1 Hour</option>\n                    <option value=\"Last 6 Hours\">Last 6 Hours</option>\n                    <option value=\"Last 24 Hours\" selected>Last 24 Hours</option>\n                </select>\n            </div>\n\n            <!-- Charts Grid -->\n            <div class=\"charts-grid\">\n                <div class=\"chart-box\">\n                    <h3>Temperature (°C)</h3>\n                    <canvas id=\"temperatureChart\"></canvas>\n                </div>\n                <div class=\"chart-box\">\n                    <h3>Humidity (%)</h3>\n                    <canvas id=\"humidityChart\"></canvas>\n                </div>\n                <div class=\"chart-box\">\n                    <h3>Wind Speed (m/s)</h3>\n                    <canvas id=\"windSpeedChart\"></canvas>\n                </div>\n                <div class=\"chart-box\">\n                    <h3>Wind Direction (°)</h3>\n                    <canvas id=\"windDirectionChart\"></canvas>\n                </div>\n                <div class=\"chart-box\">\n                    <h3>Pressure (Pa)</h3>\n                    <canvas id=\"pressureChart\"></canvas>\n                </div>\n                <div class=\"chart-box\">\n                    <h3>PM2.5 (µg/m³)</h3>\n                    <canvas id=\"pm25Chart\"></canvas>\n                </div>\n            </div>\n\n            <!-- Historical Data Table Section -->\n            <div class=\"table-container\">\n                <h3>Detailed Historical Data</h3>\n                <button id=\"downloadCsvBtn\">\n                    <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n                        <path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"></path>\n                        <polyline points=\"7 10 12 15 17 10\"></polyline>\n                        <line x1=\"12\" y1=\"15\" x2=\"12\" y2=\"3\"></line>\n                    </svg>\n                    Download as CSV\n                </button>\n\n                <div class=\"pagination-controls\" style=\"margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;\">\n                    <button id=\"prevPageBtn\" disabled>« Previous</button>\n                    <span id=\"pageInfo\">Page 1 of 1</span>\n                    <button id=\"nextPageBtn\" disabled>Next »</button>\n                </div>\n\n                <table id=\"dataTable\">\n                    <thead>\n                        <tr>\n                            <th>Timestamp (WIB)</th>\n                            <th>Temperature (°C)</th>\n                            <th>Humidity (%)</th>\n                            <th>Wind Speed (m/s)</th>\n                            <th>Wind Direction (°)</th>\n                            <th>PM2.5 (µg/m³)</th>\n                            <th>Pressure (Pa)</th>\n                        </tr>\n                    </thead>\n                    <tbody id=\"dataTableBody\">\n                        <tr>\n                            <td colspan=\"7\" style=\"text-align: center;\">Select a time filter to view data.</td>\n                        </tr>\n                    </tbody>\n                </table>\n            </div>\n        </div>\n    </div>\n\n    <script>\n        // Global variable to store the fetched data for CSV export and table\n        let currentData = [];\n        // Object to hold chart instances\n        const chartInstances = {};\n        // --- Pagination Variables ---\n        let currentPage = 1;\n        const rowsPerPage = 15; // Sesuaikan jumlah baris per halaman jika perlu\n        // --------------------------\n\n        // --- STATUS DISPLAY HELPER (from previous version) ---\n        const statusDisplay = {\n            showLoading: (chartId) => { /* ... implementasi showLoading ... */ },\n            showError: (chartId, errorMsg) => { /* ... implementasi showError ... */ },\n            showChart: (chartId) => { /* ... implementasi showChart ... */ },\n            clearAllStatuses: () => { /* ... implementasi clearAllStatuses ... */ }\n            // Catatan: Implementasi lengkap fungsi statusDisplay bisa disalin\n            // dari jawaban sebelumnya jika Anda ingin visual loading/error.\n            // Untuk fokus pada perbaikan tabel, kita bisa abaikan ini sementara.\n        };\n        // --- END STATUS DISPLAY HELPER ---\n\n\n        // --- FUNGSI INTI (Salin dari versi yang sudah bekerja) ---\n\n        // Helper function to create a Chart.js instance\n        function createChart(chartId, label, unit, yAxisLabelColor = '#06283d', legendLabelColor = '#06283d', gridColor = 'rgba(6, 40, 61, 0.2)') {\n            const ctxElement = document.getElementById(chartId);\n             if (!ctxElement) { console.error(`Canvas element with ID ${chartId} not found!`); return null; }\n            const ctx = ctxElement.getContext('2d');\n            const config = {\n                type: 'line',\n                data: { labels: [], datasets: [{ label: `${label} (${unit})`, data: [], borderColor: '#06283d', backgroundColor: 'rgba(6, 40, 61, 0.1)', fill: true, tension: 0.3, pointRadius: 1, pointHoverRadius: 4, pointBackgroundColor: '#06283d', pointBorderColor: '#06283d', pointHoverBackgroundColor: '#dff6ff', pointHoverBorderColor: '#06283d' }] },\n                options: {\n                    responsive: true, maintainAspectRatio: false,\n                    scales: {\n                        x: {\n                             type: 'time',\n                             time: { tooltipFormat: 'yyyy-MM-dd HH:mm:ss', displayFormats: { hour: 'HH:mm', day: 'MMM dd', month: 'MMM yyyy', year: 'yyyy' } },\n                            title: { display: false },\n                            ticks: { color: yAxisLabelColor, maxRotation: 45, minRotation: 0, autoSkip: true, maxTicksLimit: 10 },\n                            grid: { color: gridColor }\n                        },\n                        y: {\n                            title: { display: false }, ticks: { color: yAxisLabelColor }, beginAtZero: false, grid: { color: gridColor }\n                        }\n                    },\n                    plugins: {\n                        legend: { display: false },\n                        tooltip: {\n                             backgroundColor: 'rgba(6, 40, 61, 0.8)', titleColor: '#dff6ff', bodyColor: '#dff6ff',\n                             callbacks: { title: (tooltipItems) => { try { const date = new Date(tooltipItems[0].parsed.x); return date.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short'}); } catch(e) { return '';}} }\n                        }\n                    },\n                     interaction: { intersect: false, mode: 'index', }\n                }\n            };\n             chartInstances[chartId] = new Chart(ctx, config);\n             console.log(`Chart ${chartId} initialized successfully.`);\n             return chartInstances[chartId];\n        }\n\n        // Adjust Y-axis based on data type\n        function adjustChartYAxis(chartInstance, sensorType) {\n             const options = chartInstance.options.scales.y;\n             options.beginAtZero = false; options.suggestedMin = undefined; options.suggestedMax = undefined;\n             if (sensorType === 'wind_speed_mps' || sensorType === 'pm25') { options.beginAtZero = true; }\n             if (sensorType === 'wind_direction') { options.suggestedMin = 0; options.suggestedMax = 360; options.beginAtZero = true; }\n             if (sensorType === 'pressure') { options.beginAtZero = false; }\n             if(sensorType === 'humidity') { options.suggestedMin = 0; options.suggestedMax = 100; options.beginAtZero = true; }\n        }\n\n        // Fetch data from Node-RED API\n        async function fetchDataFromAPI(filter) {\n            console.log(`Fetching data for filter: ${filter}`);\n            // statusDisplay.clearAllStatuses(); // Hapus status lama\n            // Object.keys(chartInstances).forEach(chartId => statusDisplay.showLoading(chartId));\n            document.getElementById('dataTableBody').innerHTML = '<tr><td colspan=\"7\" style=\"text-align: center;\">Loading data...</td></tr>';\n\n            try {\n                const response = await fetch(`/histori-data?filter=${encodeURIComponent(filter)}`);\n                console.log(`API response status: ${response.status}`);\n                if (!response.ok) {\n                     const errorText = await response.text();\n                    throw new Error(`HTTP error! Status: ${response.status} ${response.statusText}. Server response: ${errorText}`);\n                }\n                const data = await response.json();\n                console.log(\"Received data length:\", data.length); // DEBUG\n                if (!Array.isArray(data)) {\n                    throw new Error(\"Invalid data format received from server (expected an array).\");\n                }\n                currentData = data; // Simpan data yang valid ke variabel global\n                return data; // Kembalikan data yang baru diambil\n            } catch (error) {\n                console.error('Error fetching data from API:', error);\n                // statusDisplay.showError('temperatureChart', error.message); // Tampilkan error di salah satu chart atau area khusus\n                 document.getElementById('dataTableBody').innerHTML = `<tr><td colspan=\"7\" style=\"text-align: center; color: #ff8a80;\">Error loading data: ${error.message}</td></tr>`;\n                currentData = []; // Kosongkan data jika error\n                return []; // Kembalikan array kosong\n            }\n        }\n\n        // Function to update all charts with the fetched data\n        function updateAllCharts(data) { // Terima data sebagai argumen\n            console.log(\"Updating all charts with data count:\", data.length);\n            const chartMapping = {\n                temperatureChart: 'temperature', humidityChart: 'humidity',\n                windSpeedChart: 'wind_speed_mps', windDirectionChart: 'wind_direction',\n                pressureChart: 'pressure', pm25Chart: 'pm25'\n            };\n\n            // statusDisplay.clearAllStatuses(); // Hapus status sebelum update\n\n            if (!Array.isArray(data) || data.length === 0) {\n                 console.log(\"No data to update charts. Clearing charts.\");\n                 for (const chartId in chartMapping) {\n                    if (chartInstances[chartId]) {\n                        chartInstances[chartId].data.labels = [];\n                        chartInstances[chartId].data.datasets[0].data = [];\n                        chartInstances[chartId].update();\n                        // statusDisplay.showError(chartId, 'No data available');\n                    }\n                 }\n                 return;\n            }\n\n            const labels = data.map(item => item.timestampWIB);\n\n            for (const chartId in chartMapping) {\n                const chartInstance = chartInstances[chartId];\n                if (chartInstance) {\n                    const sensorKey = chartMapping[chartId];\n                    const chartData = data.map(item => (item && item.hasOwnProperty(sensorKey) && item[sensorKey] !== null) ? item[sensorKey] : NaN);\n\n                    chartInstance.data.labels = labels;\n                    chartInstance.data.datasets[0].data = chartData;\n                    adjustChartYAxis(chartInstance, sensorKey);\n\n                    try {\n                        chartInstance.update();\n                         // statusDisplay.showChart(chartId);\n                    } catch (updateError) {\n                         console.error(`Error updating chart ${chartId}:`, updateError);\n                         // statusDisplay.showError(chartId, `Chart update error: ${updateError.message}`);\n                    }\n                } else {\n                     console.warn(`Chart instance for ID ${chartId} not found.`);\n                }\n            }\n        }\n\n         // Function to download CSV\n         function downloadCSV() {\n             if (!currentData || currentData.length === 0) {\n                 alert(\"No data available to download. Please select a time filter.\");\n                 return;\n             }\n             const headers = [\"Timestamp (WIB)\", \"Temperature (°C)\", \"Humidity (%)\", \"Wind Speed (m/s)\", \"Wind Direction (°)\", \"PM2.5 (µg/m³)\", \"Pressure (Pa)\"];\n             const csvRows = [ headers.join(','), ...currentData.map(item => [`\"${item.timestampWIB || ''}\"`, item.temperature !== null ? item.temperature.toFixed(1) : '', item.humidity !== null ? item.humidity.toFixed(1) : '', item.wind_speed_mps !== null ? item.wind_speed_mps.toFixed(1) : '', item.wind_direction !== null ? item.wind_direction.toFixed(0) : '', item.pm25 !== null ? item.pm25.toFixed(1) : '', item.pressure !== null ? item.pressure.toFixed(1) : ''].join(',')) ];\n             const csvContent = csvRows.join('\\n');\n             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });\n             const link = document.createElement(\"a\");\n             if (link.download !== undefined) {\n                 const url = URL.createObjectURL(blob);\n                 link.setAttribute(\"href\", url);\n                 const filterValue = document.getElementById('timeFilter').value.replace(/\\s+/g, '_');\n                 link.setAttribute(\"download\", `historical_data_${filterValue}.csv`);\n                 link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);\n             } else { alert(\"CSV download is not supported in your browser.\"); }\n         }\n\n         // Initialize all charts on page load\n         function initializeCharts() {\n             const chartColor = '#06283d'; const gridLineColor = 'rgba(6, 40, 61, 0.2)';\n             createChart('temperatureChart', 'Temperature', '°C', chartColor, chartColor, gridLineColor);\n             createChart('humidityChart', 'Humidity', '%', chartColor, chartColor, gridLineColor);\n             createChart('windSpeedChart', 'Wind Speed', 'm/s', chartColor, chartColor, gridLineColor);\n             createChart('windDirectionChart', 'Wind Direction', '°', chartColor, chartColor, gridLineColor);\n             createChart('pressureChart', 'Pressure', 'Pa', chartColor, chartColor, gridLineColor);\n             createChart('pm25Chart', 'PM2.5', 'µg/m³', chartColor, chartColor, gridLineColor);\n         }\n\n\n        // --- FUNGSI TERKAIT TABEL & PAGINATION ---\n\n        // Function to populate the data table (dengan pagination)\n        function populateTable() { // MODIFIKASI: Tidak perlu argumen 'data', gunakan global 'currentData'\n            const tableBody = document.getElementById('dataTableBody');\n            const pageInfo = document.getElementById('pageInfo');\n            const prevBtn = document.getElementById('prevPageBtn');\n            const nextBtn = document.getElementById('nextPageBtn');\n            tableBody.innerHTML = ''; // Clear previous data\n\n            // Gunakan data global yang sudah difetch\n            if (!currentData || currentData.length === 0) {\n                 tableBody.innerHTML = '<tr><td colspan=\"7\" style=\"text-align: center;\">No data available for the selected filter.</td></tr>';\n                 pageInfo.textContent = \"Page 0 of 0\";\n                 prevBtn.disabled = true;\n                 nextBtn.disabled = true;\n                 return;\n            }\n\n            const totalItems = currentData.length;\n            const totalPages = Math.ceil(totalItems / rowsPerPage);\n            if (currentPage > totalPages) currentPage = totalPages > 0 ? totalPages : 1; // Perbaiki jika halaman tidak valid\n            if (currentPage < 1) currentPage = 1;\n\n            const startIndex = (currentPage - 1) * rowsPerPage;\n            const endIndex = Math.min(startIndex + rowsPerPage, totalItems); // Gunakan Math.min\n            const paginatedData = currentData.slice(startIndex, endIndex);\n\n            console.log(`Populating table page ${currentPage}/${totalPages}, rows ${startIndex + 1}-${endIndex} of ${totalItems}`);\n\n            paginatedData.forEach(item => {\n                const row = tableBody.insertRow();\n                row.insertCell().textContent = item.timestampWIB || 'N/A';\n                row.insertCell().textContent = item.temperature !== null ? item.temperature.toFixed(1) : 'N/A';\n                row.insertCell().textContent = item.humidity !== null ? item.humidity.toFixed(1) : 'N/A';\n                row.insertCell().textContent = item.wind_speed_mps !== null ? item.wind_speed_mps.toFixed(1) : 'N/A';\n                row.insertCell().textContent = item.wind_direction !== null ? item.wind_direction.toFixed(0) : 'N/A';\n                row.insertCell().textContent = item.pm25 !== null ? item.pm25.toFixed(1) : 'N/A';\n                row.insertCell().textContent = item.pressure !== null ? item.pressure.toFixed(1) : 'N/A';\n            });\n\n            pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;\n            prevBtn.disabled = (currentPage === 1);\n            nextBtn.disabled = (currentPage === totalPages || totalPages === 0); // Disable jika tidak ada halaman / hanya 1 halaman\n        }\n\n        // Function to handle page changes\n        function changePage(direction) {\n             const totalPages = Math.ceil(currentData.length / rowsPerPage);\n             const newPage = currentPage + direction;\n\n             // Hanya populate ulang jika halaman berubah dan valid\n             if (newPage >= 1 && newPage <= totalPages) {\n                  currentPage = newPage;\n                  populateTable(); // Panggil populateTable untuk render halaman baru\n             }\n        }\n\n        // --- FUNGSI UTAMA UNTUK UPDATE UI ---\n\n        // Update UI based on Dropdown Filter\n        async function updateDataAndUI() {\n            const selectedFilterElement = document.getElementById('timeFilter');\n            if (!selectedFilterElement) { console.error(\"FATAL: Time filter dropdown not found!\"); return; }\n            const selectedFilter = selectedFilterElement.value;\n            console.log(`Filter selected: ${selectedFilter}`);\n\n            if (!selectedFilter) { console.warn(\"No time filter selected.\"); return; }\n\n            currentPage = 1; // Reset ke halaman pertama setiap filter berubah\n\n            // Fetch data baru (ini akan update currentData secara global)\n            const fetchedData = await fetchDataFromAPI(selectedFilter);\n\n            // Update chart dengan SEMUA data yang baru diambil\n            updateAllCharts(fetchedData);\n            // Populate tabel dengan data global (halaman pertama)\n            populateTable(); // Panggil tanpa argumen, akan gunakan currentData dan currentPage\n        }\n\n\n        // --- INISIALISASI ---\n\n        // Initial setup when the window loads\n        window.onload = function() {\n            console.log(\"Window loaded. Initializing...\");\n            try {\n                initializeCharts(); // Buat instance chart\n\n                // Dapatkan elemen UI\n                const timeFilterSelect = document.getElementById('timeFilter');\n                const downloadBtn = document.getElementById('downloadCsvBtn');\n                const prevBtn = document.getElementById('prevPageBtn');\n                const nextBtn = document.getElementById('nextPageBtn');\n\n                 // Tambahkan event listener\n                 if(timeFilterSelect) {\n                     timeFilterSelect.addEventListener('change', updateDataAndUI);\n                 } else { console.error(\"Time filter dropdown not found!\"); }\n                 if (downloadBtn) {\n                     downloadBtn.addEventListener('click', downloadCSV);\n                 } else { console.error(\"Download button not found!\"); }\n                 if (prevBtn) {\n                     prevBtn.addEventListener('click', () => changePage(-1));\n                 } else { console.error(\"Previous page button not found!\");}\n                 if (nextBtn) {\n                     nextBtn.addEventListener('click', () => changePage(1));\n                 } else { console.error(\"Next page button not found!\");}\n\n                // Lakukan fetch data awal\n                console.log(\"Performing initial data load...\");\n                updateDataAndUI(); // Panggil ini untuk memuat data awal & mengisi tabel/chart\n\n            } catch (initError) {\n                 console.error(\"Error during initialization:\", initError);\n                 alert(`Page initialization failed: ${initError.message}`);\n                 document.body.innerHTML = `<p style='color:red; padding: 20px;'>Error initializing page: ${initError.message}. Please check the console.</p>`;\n            }\n        };\n\n    </script>\n</body>\n</html>",
+        "output": "str",
+        "x": 320,
+        "y": 580,
+        "wires": [
+            [
+                "histori_page_out"
+            ]
+        ]
+    },
+    {
+        "id": "histori_data_in",
+        "type": "http in",
+        "z": "3b1b0785fe018009",
+        "name": "GET /histori-data",
+        "url": "/histori-data",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 120,
+        "y": 660,
+        "wires": [
+            [
+                "build_histori_query"
+            ]
+        ]
+    },
+    {
+        "id": "build_histori_query",
+        "type": "function",
+        "z": "3b1b0785fe018009",
+        "name": "Build SQL Query",
+        "func": "// Get filter from query parameter (?filter=...)\nconst filterSelection = msg.req.query.filter || \"Last 24 Hours\"; // Default jika tidak ada\n\n// Kolom yang dibutuhkan oleh client-side JS\nconst columnsToSelect = \"timestamp, temperature, humidity, wind_speed_mps, wind_direction, pressure, pm25\"; \nconst baseSql = `SELECT ${columnsToSelect} FROM sensor_data`;\nlet whereClause = \"\";\n// Data harus urut agar grafik benar\nconst orderByClause = \" ORDER BY timestamp ASC\"; \n\nnode.log(\"API received filter: \" + filterSelection);\n\nswitch (filterSelection) {\n    case \"Last 1 Hour\":\n        whereClause = \" WHERE timestamp >= DATETIME('now', '-1 hour')\";\n        break;\n    case \"Last 6 Hours\":\n        whereClause = \" WHERE timestamp >= DATETIME('now', '-6 hours')\";\n        break;\n    case \"Last 24 Hours\":\n        whereClause = \" WHERE timestamp >= DATETIME('now', '-24 hours')\";\n        break;\n    default:\n        node.warn(\"API Filter tidak dikenal: \" + filterSelection + \". Menggunakan default Last 24 Hours.\");\n        whereClause = \" WHERE timestamp >= DATETIME('now', '-24 hours')\";\n        break;\n}\n\nmsg.topic = baseSql + whereClause + orderByClause;\n\n// Hapus payload lama jika ada\ndelete msg.payload;\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 330,
+        "y": 660,
+        "wires": [
+            [
+                "get_histori_data_sqlite"
+            ]
+        ]
+    },
+    {
+        "id": "get_histori_data_sqlite",
+        "type": "sqlite",
+        "z": "3b1b0785fe018009",
+        "mydb": "54b527ebd3b3c910",
+        "sqlquery": "msg.topic",
+        "sql": "",
+        "name": "SQLite Query",
+        "x": 540,
+        "y": 660,
+        "wires": [
+            [
+                "format_histori_data_json"
+            ]
+        ]
+    },
+    {
+        "id": "format_histori_data_json",
+        "type": "function",
+        "z": "3b1b0785fe018009",
+        "name": "Format Data for Client (JSON)",
+        "func": "const queryResult = msg.payload;\nconst formattedData = [];\n\n// Helper functions untuk konversi WIB (copy dari flow sebelumnya)\nfunction pad(number) { \n    return (number < 10) ? '0' + number : number; \n}\n\nfunction formatToWibString(date) {\n    if (!date || isNaN(date.getTime())) return null;\n    const year = date.getUTCFullYear();\n    const month = pad(date.getUTCMonth() + 1);\n    const day = pad(date.getUTCDate());\n    const hours = pad(date.getUTCHours());\n    const minutes = pad(date.getUTCMinutes());\n    const seconds = pad(date.getUTCSeconds());\n    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;\n}\n\nfunction parseAndConvertToWibDate(timestampString) {\n    try {\n        const utcString = timestampString.replace(' ', 'T') + 'Z';\n        const utcDate = new Date(utcString);\n        if (isNaN(utcDate.getTime())) { return null; }\n        const wibOffset = 7 * 60 * 60 * 1000;\n        const wibTimeMillis = utcDate.getTime() + wibOffset;\n        return new Date(wibTimeMillis);\n    } catch (e) {\n        return null;\n    }\n}\n// ----\n\nif (Array.isArray(queryResult)) {\n    for (let item of queryResult) {\n        const wibDate = parseAndConvertToWibDate(item.timestamp);\n        const wibTimestampString = formatToWibString(wibDate);\n\n        if (wibTimestampString) { // Hanya proses jika timestamp valid\n            formattedData.push({\n                timestampWIB: wibTimestampString, // Kirim string WIB\n                temperature: item.temperature !== null ? parseFloat(item.temperature) : null,\n                humidity: item.humidity !== null ? parseFloat(item.humidity) : null,\n                wind_speed_mps: item.wind_speed_mps !== null ? parseFloat(item.wind_speed_mps) : null,\n                wind_direction: item.wind_direction !== null ? parseFloat(item.wind_direction) : null,\n                pressure: item.pressure !== null ? parseFloat(item.pressure) : null,\n                pm25: item.pm25 !== null ? parseFloat(item.pm25) : null\n                // Tambahkan properti lain jika perlu\n            });\n        }\n    }\n}\n\n// Set payload ke data JSON yang sudah diformat\nmsg.payload = formattedData;\n// Set header content type untuk response node\nmsg.headers = { 'content-type': 'application/json' };\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 780,
+        "y": 660,
+        "wires": [
+            [
+                "histori_data_out"
+            ]
+        ]
+    },
+    {
+        "id": "histori_data_out",
+        "type": "http response",
+        "z": "3b1b0785fe018009",
+        "name": "",
+        "statusCode": "200",
+        "headers": {},
+        "x": 1020,
+        "y": 660,
+        "wires": []
+    },
+    {
+        "id": "9fb37faa7fe5f18c",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 1,
+        "width": 6,
+        "height": 1
+    },
+    {
+        "id": "ccda69a541482567",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 3,
+        "width": 6,
+        "height": 1
+    },
+    {
+        "id": "7c4fc467f6204ff0",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 4,
+        "width": 6,
+        "height": 1
+    },
+    {
+        "id": "54aecc973fb0a742",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 5,
+        "width": 6,
+        "height": 1
+    },
+    {
+        "id": "511a8f145a820e7b",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 6,
+        "width": 6,
+        "height": 1
+    },
+    {
+        "id": "3d4c348403393725",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 8,
+        "width": 6,
+        "height": 1
+    },
+    {
+        "id": "d851e65164db1738",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 10,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "88957c6bd9347fb6",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 12,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "688bf73c558fb716",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 13,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "cdcb1fee1dc73ea8",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 14,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "9091a7fab16c46cf",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 15,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "ec6a4bf5abf34fae",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 16,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "25dd36a622c99c4d",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 17,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "09f7e57d38249682",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 18,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "f7c7fd44d6e14e20",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 20,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "f153bd9ec43bf9cf",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 22,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "c62a2283f6c352d9",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 23,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "d0267fdbfd7b08a8",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 24,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "a2507cee290ff55a",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 25,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "5f5556294daa9254",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 26,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "b509bf4ace47927c",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 27,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "beead1414b9b4d11",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 28,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "6cd27c0a0732b0e0",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 30,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "1204eef166b6c004",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 32,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "3004b4917e9e67e2",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 33,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "5dff348612b6bdd8",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 34,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "cd692f5318f3c6ba",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 35,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "6d44a73e79320235",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 36,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "002ac4cef62a3cfc",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 37,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "5b632d8262d30910",
+        "type": "ui_spacer",
+        "z": "3b1b0785fe018009",
+        "name": "spacer",
+        "group": "4c26b4b2ebc6f337",
+        "order": 38,
+        "width": 1,
+        "height": 1
+    },
+    {
+        "id": "4c26b4b2ebc6f337",
+        "type": "ui_group",
+        "name": "Historical",
+        "tab": "4085c8d20667933a",
+        "order": 1,
+        "disp": false,
+        "width": "27",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "54b527ebd3b3c910",
+        "type": "sqlitedb",
+        "db": "/home/iot2/weatherdatabase.db",
+        "mode": "RWC"
+    },
+    {
+        "id": "1498bfb91f583e3e",
+        "type": "mqtt-broker",
+        "name": "Server",
+        "broker": "10.10.169.249",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "4085c8d20667933a",
+        "type": "ui_tab",
+        "name": "Historical Data",
+        "icon": "fa-calendar",
+        "order": 4,
+        "disabled": false,
+        "hidden": false
+    }
+]
