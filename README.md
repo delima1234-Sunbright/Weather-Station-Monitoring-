@@ -76,4 +76,3 @@ Untuk melihat visualisasi data pada dashboard Node-RED:
     *   Contoh: Jika editor Anda di `http://localhost:1880`, maka dashboard akan berada di `http://localhost:1880/ui`.
     *   Buka URL dashboard di tab browser baru untuk melihat visualisasi data sensor.
 
-## Struktur Proyek (Contoh)
